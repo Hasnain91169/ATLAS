@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ATLAS Mobile Client</title>
+    <style>
+      :root {
+        --ink: #1f1f1f;
+        --muted: #4d4d4d;
+        --bg: #f5f0e9;
+        --panel: #ffffff;
+        --accent: #a23b32;
+        --border: #d9cfc2;
+      }
+      body {
+        margin: 0;
+        font-family: "Georgia", "Times New Roman", serif;
+        color: var(--ink);
+        background: linear-gradient(180deg, #f7f2ed 0%, #efe7dc 100%);
+      }
+      header {
+        padding: 16px;
+        background: var(--panel);
+        border-bottom: 2px solid var(--border);
+      }
+      header h1 {
+        margin: 0 0 8px;
+        font-size: 22px;
+      }
+      header p {
+        margin: 0;
+        color: var(--muted);
+      }
+      main {
+        padding: 16px;
+        display: grid;
+        gap: 16px;
+      }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+      }
+      label {
+        display: block;
+        font-size: 14px;
+        margin-bottom: 6px;
+      }
+      input {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 14px;
+      }
+      button {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 8px 12px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      button.secondary {
+        background: transparent;
+        border: 1px solid var(--accent);
+        color: var(--accent);
+      }
+      pre {
+        white-space: pre-wrap;
+        font-size: 13px;
+        line-height: 1.4;
+        color: var(--ink);
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .status {
+        font-size: 13px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>ATLAS Mobile Client</h1>
+      <p>Local-only. Token required. Drafts only.</p>
+    </header>
+    <main>
+      <section>
+        <div class="row">
+          <div style="flex: 1 1 240px;">
+            <label for="serverUrl">Server URL</label>
+            <input id="serverUrl" placeholder="http://192.168.1.10:7331" />
+            <div class="status">Server URL must be base URL (no /client).</div>
+          </div>
+          <div style="flex: 1 1 240px;">
+            <label for="token">X-ATLAS-TOKEN</label>
+            <input id="token" placeholder="Shared secret token" type="password" />
+          </div>
+        </div>
+        <div class="row" style="margin-top: 8px;">
+          <label>
+            <input id="rememberToken" type="checkbox" />
+            Remember token on this device
+          </label>
+        </div>
+        <div class="row" style="margin-top: 10px;">
+          <button id="saveBtn">Save Settings</button>
+          <button id="refreshBtn" class="secondary">Refresh Now</button>
+        </div>
+        <p class="status" id="statusLine">Not connected.</p>
+      </section>
+
+      <section>
+        <h2>Daily Brief</h2>
+        <pre id="dailyBrief">No data yet.</pre>
+      </section>
+
+      <section>
+        <h2>Board Report</h2>
+        <pre id="boardReport">No data yet.</pre>
+      </section>
+
+      <section>
+        <h2>Hourly Plan</h2>
+        <pre id="hourlyPlan">No data yet.</pre>
+      </section>
+
+      <section>
+        <h2>Alerts</h2>
+        <pre id="alerts">No data yet.</pre>
+      </section>
+
+      <section>
+        <h2>Tasks (Google)</h2>
+        <pre id="tasks">No data yet.</pre>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

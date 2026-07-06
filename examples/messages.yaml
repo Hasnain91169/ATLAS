@@ -1,0 +1,12 @@
+- id: 1
+  sender: ceo@example.com
+  subject: Urgent decision needed today
+  body: Please review and decide ASAP.
+- id: 2
+  sender: ops@example.com
+  subject: Schedule follow up
+  body: Please handle the meeting logistics.
+- id: 3
+  sender: legal@example.com
+  subject: Contract breach notice
+  body: Legal review required before response.

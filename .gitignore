@@ -1,0 +1,50 @@
+# Byte-compiled / optimized / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local data & secrets
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+.atlas/
+credentials*.json
+token*.json
+*.pem
+*.key
+
+# Generated audio artifacts
+audio/
+*.mp3
+*.wav
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
