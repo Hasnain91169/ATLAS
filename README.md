@@ -28,6 +28,8 @@ harness, and watch a traced org run with cost totals. Run it locally with
 [Streamlit Community Cloud](https://share.streamlit.io) straight from this repo
 (`requirements.txt` + `streamlit_app.py` are included).
 
+Please understand that no LLM is being used with this so this is just for a quick demonstration purposes. If you want the full experience then please follow the installation steps.
+
 [![Live demo](https://img.shields.io/badge/live-demo-brightgreen)](https://atlas-demo.streamlit.app)
 
 ## Engineering highlights
