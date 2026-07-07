@@ -9,6 +9,8 @@ cost/latency tracing. See the repo for the real, LLM-backed paths.
 
 from __future__ import annotations
 
+import json
+
 import streamlit as st
 
 from atlas.evals.dataset import load_dataset
@@ -24,17 +26,53 @@ from atlas.prediction.stub import StubPredictionClient
 st.set_page_config(page_title="ATLAS — offline demo", page_icon="🧭", layout="wide")
 
 
+# Per-head canned output so the synthesis reads like four distinct departments.
+_HEAD_OUTPUT = {
+    "Operations": (
+        "Operations: meeting load is heavy against limited focus time.",
+        ["5 meetings vs 90m of focus time"],
+        ["Protect a 2h focus block", "Batch status updates into one slot"],
+    ),
+    "Risk & Compliance": (
+        "Risk & Compliance: burnout risk is elevated.",
+        ["Burnout risk detected (HIGH)"],
+        ["Cap meetings at 3/day", "Reinstate a recovery window"],
+    ),
+    "Finance": (
+        "Finance: a budget obligation is unscheduled.",
+        ["Q3 budget review has no date"],
+        ["Book the Q3 budget review before Friday"],
+    ),
+    "Learning": (
+        "Learning: a recurring overcommitment pattern is emerging.",
+        ["Overcommitment recurred this week"],
+        ["Adopt a weekly review checklist"],
+    ),
+}
+
+
 class DemoLLM(LLMClient):
     """Scripted offline stand-in so the trace/cost view is populated (no API calls)."""
 
     def complete(self, prompt: str) -> str:
         self.last_usage = LLMUsage(input_tokens=180, output_tokens=60, cost_usd=0.0012)
         if "department head" in prompt:
+            for head, (summary, risks, recs) in _HEAD_OUTPUT.items():
+                if head in prompt:
+                    return json.dumps(
+                        {
+                            "domain_summary": summary,
+                            "key_risks": risks,
+                            "recommendations_for_atlas": recs,
+                            "proposed_actions": [],
+                            "confidence": 0.7,
+                            "uncertainties": [],
+                        }
+                    )
             return (
-                '{"domain_summary":"Synthesized worker findings.",'
-                '"key_risks":["Meeting load is high this week"],'
-                '"recommendations_for_atlas":["Protect a 2h focus block","Defer optional scope"],'
-                '"proposed_actions":[],"confidence":0.7,"uncertainties":[]}'
+                '{"domain_summary":"Synthesized worker findings.","key_risks":[],'
+                '"recommendations_for_atlas":[],"proposed_actions":[],'
+                '"confidence":0.6,"uncertainties":[]}'
             )
         return (
             '{"summary":"Reviewed the current context.","findings":[],'
@@ -136,4 +174,4 @@ with tab_org:
             m1.metric("LLM calls", t.llm_calls)
             m2.metric("Tokens", t.total_tokens)
             m3.metric("Cost", f"${t.total_cost_usd:.4f}")
-            st.code(render_trace(t.trace), language="text")
+            st.code(render_trace(t), language="text")
