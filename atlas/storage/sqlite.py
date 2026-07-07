@@ -5,9 +5,13 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from atlas.models.tasks import Task, TaskList
 from atlas.storage.schema import CREATE_TABLES, SCHEMA_VERSION
+
+if TYPE_CHECKING:
+    from atlas.prediction.models import PredictionResult
 
 
 def default_db_path() -> Path:
@@ -564,3 +568,51 @@ def set_pending_action_status(
     query = f"UPDATE pending_action SET {', '.join(fields)} WHERE id = ?"
     conn.execute(query, params)
     conn.commit()
+
+
+def insert_audience_forecast(
+    conn: sqlite3.Connection, requirement: str, result: "PredictionResult"
+) -> int:
+    created_at = datetime.now(timezone.utc).isoformat()
+    raw_json = json.dumps(result.raw, sort_keys=True)
+    cursor = conn.execute(
+        "INSERT INTO audience_forecast "
+        "(created_at, requirement, verdict, risk_score, report_markdown, "
+        "simulation_id, report_id, raw_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            created_at,
+            requirement,
+            result.verdict,
+            result.risk_score,
+            result.report_markdown,
+            result.simulation_id,
+            result.report_id,
+            raw_json,
+        ),
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def get_latest_audience_forecast(
+    conn: sqlite3.Connection,
+) -> dict[str, object] | None:
+    row = conn.execute(
+        "SELECT id, created_at, requirement, verdict, risk_score, report_markdown, "
+        "simulation_id, report_id, raw_json "
+        "FROM audience_forecast ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row["id"],
+        "created_at": row["created_at"],
+        "requirement": row["requirement"],
+        "verdict": row["verdict"],
+        "risk_score": row["risk_score"],
+        "report_markdown": row["report_markdown"],
+        "simulation_id": row["simulation_id"],
+        "report_id": row["report_id"],
+        "raw": json.loads(row["raw_json"]),
+    }

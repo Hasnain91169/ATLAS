@@ -20,3 +20,13 @@ def test_doctor_reachable_server_without_token_hint(tmp_path, monkeypatch, capsy
         assert "Server reachable; token required for /api/v1/* endpoints." in output
     finally:
         server.shutdown()
+
+
+def test_doctor_reports_mirofish_backend_unreachable(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("MIROFISH_BASE_URL", "http://127.0.0.1:1")
+    db_path = tmp_path / "atlas.db"
+
+    run_doctor(str(db_path), "http://127.0.0.1:0")
+    output = capsys.readouterr().out
+    assert "MiroFish Backend: NO" in output
+    assert "MiroFish backend not reachable" in output

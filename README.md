@@ -48,6 +48,9 @@ that uses it.
 | `OPENAI_API_KEY` | LLM features | Any LLM-backed reasoning |
 | `OPENAI_MODEL` | LLM features | Optional (default `gpt-5-mini`) |
 | `OPENAI_BASE_URL` | LLM features | Optional (custom/proxy endpoint) |
+| `MIROFISH_BASE_URL` | `predict audience --enable-prediction` | Optional (default `http://localhost:5001`, your self-hosted MiroFish backend) |
+| `MIROFISH_PLATFORM` | Prediction features | Optional (`reddit`\|`twitter`\|`parallel`, default `reddit`) |
+| `MIROFISH_MAX_ROUNDS` | Prediction features | Optional (simulation rounds, default `10`) |
 | `ELEVENLABS_API_KEY` | Board-meeting `speak` | Generating audio |
 | `ELEVENLABS_MODEL` | Board-meeting `speak` | Optional (default `eleven_multilingual_v2`) |
 | `GOOGLE_TASKS_CLIENT_ID` | `tasks sync` | Google Tasks sync |
@@ -86,6 +89,12 @@ atlas actions propose
 atlas actions list
 atlas actions approve <action_id>
 
+# Predict audience reaction with MiroFish (offline stub by default)
+atlas predict audience --requirement "How will staff react to this reorg?" \
+    --input announcement.md
+# Drive a real self-hosted MiroFish backend (see Prediction below):
+atlas predict audience --requirement "..." --input brief.md --enable-prediction
+
 # Google Tasks (read-only sync into local DB)
 atlas tasks sync --config config.yaml
 atlas tasks list
@@ -101,6 +110,30 @@ atlas serve            # requires ATLAS_MOBILE_TOKEN
 ```
 
 See `examples/messages.yaml` for a sample input file.
+
+## Prediction (MiroFish)
+
+`atlas predict audience` rehearses how a real-world audience might react to a
+message, announcement, or brief *before* you commit to it. It seeds
+[MiroFish](https://github.com/666ghj/MiroFish) — a self-hosted, multi-agent swarm
+simulation engine — with your document(s) and a natural-language prediction
+requirement, drives its simulation pipeline, and returns a reaction report plus an
+approximate risk verdict (`LOW`/`MEDIUM`/`HIGH`). Results are stored locally.
+
+By default the command runs against a **deterministic offline stub**, so it works
+with no external services. To run a real simulation:
+
+1. Stand up MiroFish locally per its README (clone, set its own `LLM_API_KEY` +
+   `ZEP_API_KEY`, then `docker compose up -d`). Its Flask backend listens on
+   `http://localhost:5001`.
+2. Point Atlas at it with `MIROFISH_BASE_URL` (defaults to `http://localhost:5001`)
+   and pass `--enable-prediction`.
+
+A real run is asynchronous and can take several minutes (MiroFish builds a persona
+graph, generates agents, runs N simulation rounds, then a report). MiroFish
+simulates *collective/social reaction* to a seed event — it fits audience/PR/comms
+questions, not private single-task decisions. `atlas doctor` reports whether the
+backend is reachable.
 
 ## Development
 
@@ -124,6 +157,7 @@ atlas/
   mobile/        Local mobile server
   models/        Pydantic data models
   org/           Hierarchical orchestrator + protocol
+  prediction/    MiroFish audience-reaction client + workflow
   risk/          Risk rules and alerts
   storage/       SQLite persistence + schema
   tasks/         Task providers (Google, stub)

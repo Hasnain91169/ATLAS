@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 11
 
 CREATE_TABLES = """
 CREATE TABLE IF NOT EXISTS system_log (
@@ -91,5 +91,16 @@ CREATE TABLE IF NOT EXISTS pending_action (
     decided_at TEXT,
     executed_at TEXT,
     error TEXT
+);
+CREATE TABLE IF NOT EXISTS audience_forecast (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    requirement TEXT NOT NULL,
+    verdict TEXT NOT NULL,
+    risk_score REAL NOT NULL,
+    report_markdown TEXT NOT NULL,
+    simulation_id TEXT,
+    report_id TEXT,
+    raw_json TEXT NOT NULL
 );
 """

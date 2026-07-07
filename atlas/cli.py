@@ -22,6 +22,10 @@ from atlas.models.tasks import Task
 from atlas.tasks.google import GoogleTasksAdapter
 from atlas.org.orchestrator import build_context as build_org_context
 from atlas.org.orchestrator import run_atlas_synthesis, run_department_heads
+from atlas.prediction.audience import build_seed, load_document, predict_audience
+from atlas.prediction.mirofish import MiroFishClient
+from atlas.prediction.models import SeedDocument
+from atlas.prediction.stub import StubPredictionClient
 from atlas.storage.sqlite import (
     connect,
     default_db_path,
@@ -274,6 +278,34 @@ def build_parser() -> argparse.ArgumentParser:
         "--auto",
         action="store_true",
         help="Auto-select the best candidate task.",
+    )
+    predict = subparsers.add_parser(
+        "predict",
+        help="Rehearse real-world reactions with MiroFish.",
+    )
+    predict_sub = predict.add_subparsers(dest="predict_command", required=True)
+    predict_audience = predict_sub.add_parser(
+        "audience",
+        help="Predict how an audience reacts to a message/announcement.",
+    )
+    predict_audience.add_argument(
+        "--requirement",
+        required=True,
+        help="Natural-language prediction ask (e.g. 'How will staff react to this reorg?').",
+    )
+    predict_audience.add_argument(
+        "--input",
+        action="append",
+        default=[],
+        help="Seed document path (repeatable). Defaults to the requirement text.",
+    )
+    predict_audience.add_argument("--project-name", help="Optional MiroFish project name.")
+    predict_audience.add_argument("--context", help="Optional additional context.")
+    predict_audience.add_argument("--db", help="Override default database path.")
+    predict_audience.add_argument(
+        "--enable-prediction",
+        action="store_true",
+        help="Use the live MiroFish backend instead of the offline stub.",
     )
     agents = subparsers.add_parser(
         "agents",
@@ -760,6 +792,12 @@ def run_doctor(db_path: str | None, server_url: str) -> int:
     else:
         print(f"API Status: Error ({status_code})")
     print(f"Shell Token: {'SET' if token else 'MISSING'}")
+    mirofish_url = os.environ.get("MIROFISH_BASE_URL", "http://localhost:5001")
+    mirofish_ok, mirofish_error = _check_health(mirofish_url)
+    print(
+        f"MiroFish Backend: {'OK' if mirofish_ok else 'NO'} ({mirofish_url})"
+        + (f" - {mirofish_error}" if mirofish_error else "")
+    )
     print("")
     print(f"Latest Daily Brief: {latest_daily['timestamp'] if latest_daily else 'None'}")
     print(f"Latest Hourly Plan: {latest_hourly['created_at'] if latest_hourly else 'None'}")
@@ -786,6 +824,12 @@ def run_doctor(db_path: str | None, server_url: str) -> int:
         print("- Server reachable without token; check auth configuration.")
     if token_missing and (not health_ok or not server_url):
         print("- ATLAS_MOBILE_TOKEN is missing; set it before running `atlas serve`.")
+    if not mirofish_ok:
+        print(
+            "- MiroFish backend not reachable; `predict audience` uses the offline stub. "
+            "Run MiroFish locally (github.com/666ghj/MiroFish) and set MIROFISH_BASE_URL "
+            "to use --enable-prediction."
+        )
     if server_url.rstrip("/").endswith("/client"):
         print("- Server URL must be the base URL, not /client.")
     if status_code == 200 and not status_payload_ok:
@@ -1107,6 +1151,54 @@ def run_actions_approve(db_path: str | None, action_id: int) -> int:
     return 0
 
 
+def run_predict_audience(
+    db_path: str | None,
+    inputs: list[str],
+    requirement: str,
+    enable_prediction: bool,
+    project_name: str | None,
+    context: str | None,
+) -> int:
+    documents: list[SeedDocument] = []
+    for raw_path in inputs:
+        path = Path(raw_path).expanduser()
+        if not path.is_file():
+            print(f"Input file not found: {path}", file=sys.stderr)
+            return 2
+        documents.append(load_document(path))
+
+    if enable_prediction:
+        client = MiroFishClient.from_env()
+    else:
+        client = StubPredictionClient()
+
+    seed = build_seed(requirement, documents, project_name, context)
+
+    resolved_db_path = (
+        Path(db_path).expanduser().resolve() if db_path else default_db_path()
+    )
+    conn = connect(resolved_db_path)
+    try:
+        init_db(conn)
+        try:
+            result = predict_audience(client, conn, seed)
+        except Exception as exc:
+            print(f"Prediction failed: {str(exc)[:300]}", file=sys.stderr)
+            return 2
+    finally:
+        conn.close()
+
+    print(result.report_markdown)
+    print("")
+    print(f"Reaction risk: {result.verdict} (score {result.risk_score:.2f})")
+    if result.simulation_id:
+        print(
+            f"Explore the simulated world: {result.simulation_id} "
+            "(open the MiroFish frontend to chat with agents)."
+        )
+    return 0
+
+
 def run_actions_reject(db_path: str | None, action_id: int) -> int:
     resolved_db_path = (
         Path(db_path).expanduser().resolve() if db_path else default_db_path()
@@ -1326,6 +1418,18 @@ def main(argv: list[str] | None = None) -> int:
                 args.auto,
             )
         print("Unknown actions command.", file=sys.stderr)
+        return 2
+    if args.command == "predict":
+        if args.predict_command == "audience":
+            return run_predict_audience(
+                args.db,
+                args.input,
+                args.requirement,
+                args.enable_prediction,
+                args.project_name,
+                args.context,
+            )
+        print("Unknown predict command.", file=sys.stderr)
         return 2
     if args.command == "serve":
         return run_serve(args.host, args.port, args.db, args.allow_lan_cors)
