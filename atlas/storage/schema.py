@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 CREATE_TABLES = """
 CREATE TABLE IF NOT EXISTS system_log (
@@ -102,5 +102,15 @@ CREATE TABLE IF NOT EXISTS audience_forecast (
     simulation_id TEXT,
     report_id TEXT,
     raw_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS eval_run (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    dataset TEXT NOT NULL,
+    n INTEGER NOT NULL,
+    heuristic_accuracy REAL NOT NULL,
+    llm_accuracy REAL,
+    agreement REAL,
+    metrics_json TEXT NOT NULL
 );
 """

@@ -22,6 +22,10 @@ from atlas.models.tasks import Task
 from atlas.tasks.google import GoogleTasksAdapter
 from atlas.org.orchestrator import build_context as build_org_context
 from atlas.org.orchestrator import run_atlas_synthesis, run_department_heads
+from atlas.evals.dataset import load_dataset
+from atlas.evals.report import render_markdown
+from atlas.evals.runner import run_eval
+from atlas.llm.openai import OpenAIClient
 from atlas.prediction.audience import build_seed, load_document, predict_audience
 from atlas.prediction.mirofish import MiroFishClient
 from atlas.prediction.models import SeedDocument
@@ -43,6 +47,7 @@ from atlas.storage.sqlite import (
     insert_triage_report,
     insert_task_sync_log,
     insert_pending_action,
+    insert_eval_run,
     list_alerts,
     list_pending_actions,
     list_tasks,
@@ -311,6 +316,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--verbose",
         action="store_true",
         help="Log each MiroFish pipeline stage's response to stderr.",
+    )
+    evals = subparsers.add_parser(
+        "evals",
+        help="Evaluate ATLAS's LLM components against labeled datasets.",
+    )
+    evals_sub = evals.add_subparsers(dest="evals_command", required=True)
+    evals_run = evals_sub.add_parser(
+        "run", help="Score the reaction-verdict judges against the golden set."
+    )
+    evals_run.add_argument("--db", help="Override default database path.")
+    evals_run.add_argument("--dataset", help="Path to a JSONL dataset (defaults to golden set).")
+    evals_run.add_argument("--limit", type=int, help="Evaluate only the first N examples.")
+    evals_run.add_argument(
+        "--enable-llm",
+        action="store_true",
+        help="Also evaluate the LLM-as-judge (requires an LLM key).",
     )
     agents = subparsers.add_parser(
         "agents",
@@ -1205,6 +1226,47 @@ def run_predict_audience(
     return 0
 
 
+def run_evals_run(
+    db_path: str | None,
+    dataset: str | None,
+    limit: int | None,
+    enable_llm: bool,
+) -> int:
+    try:
+        examples = load_dataset(dataset)
+    except (OSError, ValueError) as exc:
+        print(f"Failed to load dataset: {exc}", file=sys.stderr)
+        return 2
+    if limit is not None:
+        examples = examples[:limit]
+    if not examples:
+        print("Dataset is empty.", file=sys.stderr)
+        return 2
+
+    llm = None
+    if enable_llm:
+        try:
+            llm = OpenAIClient.from_env()
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+
+    dataset_name = Path(dataset).stem if dataset else "reaction_golden"
+    report = run_eval(examples, llm=llm, dataset=dataset_name)
+    print(render_markdown(report))
+
+    resolved_db_path = (
+        Path(db_path).expanduser().resolve() if db_path else default_db_path()
+    )
+    conn = connect(resolved_db_path)
+    try:
+        init_db(conn)
+        insert_eval_run(conn, report)
+    finally:
+        conn.close()
+    return 0
+
+
 def run_actions_reject(db_path: str | None, action_id: int) -> int:
     resolved_db_path = (
         Path(db_path).expanduser().resolve() if db_path else default_db_path()
@@ -1437,6 +1499,11 @@ def main(argv: list[str] | None = None) -> int:
                 args.verbose,
             )
         print("Unknown predict command.", file=sys.stderr)
+        return 2
+    if args.command == "evals":
+        if args.evals_command == "run":
+            return run_evals_run(args.db, args.dataset, args.limit, args.enable_llm)
+        print("Unknown evals command.", file=sys.stderr)
         return 2
     if args.command == "serve":
         return run_serve(args.host, args.port, args.db, args.allow_lan_cors)

@@ -37,6 +37,10 @@ self-hosted, multi-agent social simulator — to predict how an audience will re
   risk verdict by an LLM, degrading gracefully to a deterministic keyword heuristic
   when no model is configured or its output is unusable
   ([atlas/prediction/assess.py](atlas/prediction/assess.py)).
+- **Eval harness** — `atlas evals run` scores the verdict judges against a labeled
+  golden set (accuracy, per-class confusion, heuristic↔LLM agreement, latency) and
+  persists results. It's how we *know* the keyword heuristic underperforms the LLM
+  judge, not just assume it ([atlas/evals/](atlas/evals/runner.py)).
 - **Provider-agnostic + local models** — any OpenAI-compatible endpoint, including
   local Ollama/LM Studio ([atlas/llm/](atlas/llm/base.py)).
 - **Tested like production** — 70+ tests, including **fully mocked network
@@ -90,6 +94,7 @@ atlas org run --verbose                 # run the multi-agent org loop
 atlas predict audience \
   --requirement "How will staff react to this reorg?" \
   --input examples/sample-announcement.md   # offline stub by default
+atlas evals run                         # score the verdict judges on the golden set
 ```
 
 Everything runs offline out of the box (deterministic stubs). LLM and external

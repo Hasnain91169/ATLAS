@@ -11,6 +11,7 @@ from atlas.models.tasks import Task, TaskList
 from atlas.storage.schema import CREATE_TABLES, SCHEMA_VERSION
 
 if TYPE_CHECKING:
+    from atlas.evals.models import EvalReport
     from atlas.prediction.models import PredictionResult
 
 
@@ -589,6 +590,42 @@ def insert_audience_forecast(
             result.simulation_id,
             result.report_id,
             raw_json,
+        ),
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def insert_eval_run(conn: sqlite3.Connection, report: "EvalReport") -> int:
+    created_at = datetime.now(timezone.utc).isoformat()
+    by_name = {judge.name: judge for judge in report.judges}
+    heuristic_acc = by_name["heuristic"].accuracy if "heuristic" in by_name else 0.0
+    llm_acc = by_name["llm"].accuracy if "llm" in by_name else None
+    metrics = {
+        "judges": {
+            judge.name: {
+                "n": judge.n,
+                "correct": judge.correct,
+                "accuracy": judge.accuracy,
+                "avg_latency_ms": judge.avg_latency_ms,
+                "confusion": {f"{e}->{p}": c for (e, p), c in judge.confusion.items()},
+            }
+            for judge in report.judges
+        },
+        "agreement": report.agreement,
+    }
+    cursor = conn.execute(
+        "INSERT INTO eval_run "
+        "(created_at, dataset, n, heuristic_accuracy, llm_accuracy, agreement, metrics_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            created_at,
+            report.dataset,
+            report.n,
+            heuristic_acc,
+            llm_acc,
+            report.agreement,
+            json.dumps(metrics, sort_keys=True),
         ),
     )
     conn.commit()
