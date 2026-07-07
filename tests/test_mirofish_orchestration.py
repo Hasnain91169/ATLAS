@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from atlas.prediction.mirofish import MiroFishClient
 from atlas.prediction.models import PredictionSeed, SeedDocument
 
@@ -19,8 +21,13 @@ class FakeResponse:
         return False
 
 
+def ok(data: dict) -> FakeResponse:
+    """Wrap data in MiroFish's real {"success", "data"} envelope."""
+    return FakeResponse({"success": True, "data": data})
+
+
 class FakeBackend:
-    """Routes MiroFish requests by path/method and drives one poll loop."""
+    """Routes MiroFish requests by path/method using the real response shapes."""
 
     def __init__(self):
         self.run_status_calls = 0
@@ -30,67 +37,69 @@ class FakeBackend:
     def __call__(self, req, timeout=None):
         path = req.full_url.replace("http://localhost:5001", "")
         self.seen_paths.append(path)
-        method = req.method
 
         if path == "/api/graph/ontology/generate":
             self.ontology_content_type = req.headers.get("Content-type")
-            return FakeResponse({"project_id": "p1"})
+            return ok({"project_id": "p1"})
         if path == "/api/graph/build":
-            return FakeResponse({"task_id": "t-graph"})
+            return ok({"task_id": "t-graph"})
         if path == "/api/graph/task/t-graph":
-            return FakeResponse({"status": "completed", "graph_id": "g1"})
+            # graph_id is nested under result, status "completed".
+            return ok({"status": "completed", "result": {"graph_id": "g1"}})
         if path == "/api/simulation/create":
-            return FakeResponse({"simulation_id": "s1"})
+            return ok({"simulation_id": "s1", "status": "created"})
         if path == "/api/simulation/prepare":
-            return FakeResponse({"task_id": "t-prep"})
+            return ok({"task_id": "t-prep", "status": "preparing"})
         if path == "/api/simulation/prepare/status":
-            return FakeResponse({"status": "completed"})
+            return ok({"status": "ready", "progress": 100})  # prepare -> "ready"
         if path == "/api/simulation/start":
             body = json.loads(req.data.decode("utf-8"))
             assert body["max_rounds"] == 3
             assert body["platform"] == "reddit"
-            return FakeResponse({"status": "running", "pid": 42})
+            return ok({"runner_status": "running"})
         if path == "/api/simulation/s1/run-status":
             self.run_status_calls += 1
             if self.run_status_calls < 2:
-                return FakeResponse({"current_round": 0, "total_rounds": 2})
-            return FakeResponse({"current_round": 2, "total_rounds": 2})
+                return ok({"runner_status": "running", "current_round": 0, "total_rounds": 2})
+            return ok({"runner_status": "completed", "current_round": 2, "total_rounds": 2})
         if path == "/api/report/generate":
-            return FakeResponse({"report_id": "r1", "task_id": "t-rep"})
+            return ok({"report_id": "r1", "task_id": "t-rep", "status": "generating"})
         if path == "/api/report/generate/status":
-            return FakeResponse({"status": "completed"})
+            return ok({"status": "completed", "progress": 100})
         if path == "/api/report/r1":
-            return FakeResponse(
+            return ok(
                 {
                     "report_id": "r1",
-                    "outline": "Reaction; Sentiment",
+                    "outline": {"sections": ["Reaction", "Sentiment"]},
                     "markdown_content": (
                         "# Reaction\nbacklash outrage protest boycott anger criticism"
                     ),
                 }
             )
-        raise AssertionError(f"Unexpected {method} {path}")
+        raise AssertionError(f"Unexpected {req.method} {path}")
+
+
+def _client(**kw):
+    return MiroFishClient(
+        "http://localhost:5001", max_rounds=3, poll_interval=0, deadline=30, **kw
+    )
 
 
 def test_full_pipeline(monkeypatch):
     backend = FakeBackend()
     monkeypatch.setattr("atlas.prediction.mirofish.urlopen", backend)
 
-    client = MiroFishClient(
-        "http://localhost:5001", max_rounds=3, poll_interval=0, deadline=30
-    )
     seed = PredictionSeed(
         requirement="How will people react?",
         documents=[SeedDocument(filename="msg.md", content="A bold announcement.")],
     )
+    result = _client().simulate(seed)
 
-    result = client.simulate(seed)
-
-    assert result.verdict == "HIGH"
+    assert result.verdict == "HIGH"          # heuristic on backlash-heavy report
     assert result.simulation_id == "s1"
     assert result.report_id == "r1"
     assert "backlash" in result.report_markdown
-    assert backend.run_status_calls >= 2  # polling actually looped
+    assert backend.run_status_calls >= 2     # polling actually looped
     assert "multipart/form-data" in backend.ontology_content_type
 
 
@@ -103,20 +112,23 @@ class FakeLLM:
 
 
 def test_llm_classifies_report(monkeypatch):
-    backend = FakeBackend()
-    monkeypatch.setattr("atlas.prediction.mirofish.urlopen", backend)
-
-    # Report text is full of backlash terms (heuristic would say HIGH), but the
-    # LLM overrides to LOW -> proves the LLM path drives the verdict.
+    monkeypatch.setattr("atlas.prediction.mirofish.urlopen", FakeBackend())
+    # Report is backlash-heavy (heuristic -> HIGH), but the LLM overrides to LOW.
     llm = FakeLLM('{"verdict":"LOW","risk_score":0.15}')
-    client = MiroFishClient(
-        "http://localhost:5001", max_rounds=3, poll_interval=0, deadline=30, llm=llm
+    result = _client(llm=llm).simulate(
+        PredictionSeed(requirement="q", documents=[])
     )
-    seed = PredictionSeed(requirement="q", documents=[])
-
-    result = client.simulate(seed)
     assert result.verdict == "LOW"
     assert result.risk_score == 0.15
+
+
+def test_success_false_raises(monkeypatch):
+    def fail(req, timeout=None):
+        return FakeResponse({"success": False, "error": "ontology extraction failed"})
+
+    monkeypatch.setattr("atlas.prediction.mirofish.urlopen", fail)
+    with pytest.raises(RuntimeError, match="ontology extraction failed"):
+        _client().simulate(PredictionSeed(requirement="q", documents=[]))
 
 
 def test_backend_unreachable_message(monkeypatch):
@@ -126,12 +138,5 @@ def test_backend_unreachable_message(monkeypatch):
         raise URLError("Connection refused")
 
     monkeypatch.setattr("atlas.prediction.mirofish.urlopen", boom)
-    client = MiroFishClient("http://localhost:5001", poll_interval=0)
-    seed = PredictionSeed(requirement="x", documents=[])
-
-    try:
-        client.simulate(seed)
-    except RuntimeError as exc:
-        assert "backend running" in str(exc)
-    else:
-        raise AssertionError("Expected RuntimeError")
+    with pytest.raises(RuntimeError, match="backend running"):
+        _client().simulate(PredictionSeed(requirement="q", documents=[]))

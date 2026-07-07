@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import uuid
 from typing import Any, Callable
@@ -14,13 +15,16 @@ from atlas.prediction.base import PredictionClient
 from atlas.prediction.models import PredictionResult, PredictionSeed
 
 # Self-hosted MiroFish backend (github.com/666ghj/MiroFish). Local Flask app,
-# no auth, CORS open. Not a hosted SaaS endpoint.
+# no auth, CORS open. Not a hosted SaaS endpoint. Every response is wrapped as
+# {"success": bool, "data": {...}}; _send() unwraps `data` for the callers.
 DEFAULT_BASE_URL = "http://localhost:5001"
 USER_AGENT = "atlas/0.1"
 
-# Terminal status strings the backend uses across its async stages.
-_DONE = {"completed", "done", "finished", "success", "succeeded"}
-_FAILED = {"failed", "error", "cancelled", "canceled"}
+# Terminal status strings the backend uses across its async stages. Graph/report
+# tasks report "completed"; simulation prepare reports "ready"; a finished run
+# reports runner_status "completed".
+_DONE = {"completed", "done", "finished", "ready", "success", "succeeded"}
+_FAILED = {"failed", "error", "stopped", "cancelled", "canceled"}
 
 
 class MiroFishClient(PredictionClient):
@@ -42,6 +46,7 @@ class MiroFishClient(PredictionClient):
         deadline: float = 1800.0,
         request_timeout: float = 60.0,
         llm: LLMClient | None = None,
+        verbose: bool = False,
     ):
         self._base_url = base_url.rstrip("/")
         self._platform = platform
@@ -50,13 +55,20 @@ class MiroFishClient(PredictionClient):
         self._deadline = deadline
         self._request_timeout = request_timeout
         self._llm = llm
+        self._verbose = verbose
 
     @classmethod
-    def from_env(cls) -> "MiroFishClient":
+    def from_env(cls, verbose: bool = False) -> "MiroFishClient":
         base_url = os.environ.get("MIROFISH_BASE_URL", DEFAULT_BASE_URL)
         platform = os.environ.get("MIROFISH_PLATFORM", "reddit")
         max_rounds = int(os.environ.get("MIROFISH_MAX_ROUNDS", "10"))
-        return cls(base_url, platform=platform, max_rounds=max_rounds, llm=_llm_from_env())
+        return cls(
+            base_url,
+            platform=platform,
+            max_rounds=max_rounds,
+            llm=_llm_from_env(),
+            verbose=verbose or os.environ.get("MIROFISH_VERBOSE") == "1",
+        )
 
     # -- pipeline ---------------------------------------------------------
 
@@ -236,7 +248,7 @@ class MiroFishClient(PredictionClient):
     def _send(self, req: Request, path: str) -> dict[str, Any]:
         try:
             with urlopen(req, timeout=self._request_timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
+                payload = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             raise RuntimeError(
                 f"MiroFish HTTP {exc.code} on {path}: {_extract_error_message(exc)}"
@@ -247,6 +259,28 @@ class MiroFishClient(PredictionClient):
                 "Is the backend running at "
                 f"{self._base_url}?"
             ) from None
+        data = _unwrap(payload, path)
+        if self._verbose:
+            print(f"[mirofish] {req.method} {path} -> {json.dumps(data)[:600]}", file=sys.stderr)
+        return data
+
+
+def _unwrap(payload: Any, path: str) -> dict[str, Any]:
+    """Peel MiroFish's {"success": bool, "data": {...}} envelope for callers."""
+    if isinstance(payload, dict) and "success" in payload:
+        if not payload.get("success", False):
+            raise RuntimeError(f"MiroFish {path}: {_err_text(payload.get('error'))}")
+        data = payload.get("data")
+        if isinstance(data, dict):
+            return data
+        return {"data": data} if data is not None else {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _err_text(error: Any) -> str:
+    if isinstance(error, dict):
+        return str(error.get("message") or error)
+    return str(error) if error else "request failed"
 
 
 # -- helpers --------------------------------------------------------------
@@ -271,11 +305,16 @@ def _status_done(payload: dict[str, Any]) -> bool:
 
 
 def _status_failed(payload: dict[str, Any]) -> bool:
-    return str(payload.get("status", "")).lower() in _FAILED
+    # Most stages report `status`; the run stage reports `runner_status`.
+    for key in ("status", "runner_status"):
+        if str(payload.get(key, "")).lower() in _FAILED:
+            return True
+    return False
 
 
 def _run_done(payload: dict[str, Any]) -> bool:
-    if _status_done(payload):
+    # run-status uses runner_status + current_round/total_rounds (no `status`).
+    if str(payload.get("runner_status", "")).lower() == "completed":
         return True
     current = payload.get("current_round")
     total = payload.get("total_rounds")
@@ -323,12 +362,10 @@ def _extract_error_message(exc: HTTPError) -> str:
             payload = json.loads(body)
         except json.JSONDecodeError:
             payload = {}
-        message = (
-            payload.get("error", {}).get("message")
-            if isinstance(payload, dict)
-            else None
-        )
-        if message:
+        # MiroFish errors are {"success": false, "error": "..."}; other APIs
+        # nest {"error": {"message": "..."}}. Handle both.
+        message = _err_text(payload.get("error")) if isinstance(payload, dict) else None
+        if message and message != "request failed":
             return str(message)
         return body.strip()[:200]
     return str(exc.reason)

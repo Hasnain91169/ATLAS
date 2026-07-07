@@ -307,6 +307,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use the live MiroFish backend instead of the offline stub.",
     )
+    predict_audience.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Log each MiroFish pipeline stage's response to stderr.",
+    )
     agents = subparsers.add_parser(
         "agents",
         help="Run AI agents and print draft outputs.",
@@ -1158,6 +1163,7 @@ def run_predict_audience(
     enable_prediction: bool,
     project_name: str | None,
     context: str | None,
+    verbose: bool = False,
 ) -> int:
     documents: list[SeedDocument] = []
     for raw_path in inputs:
@@ -1168,7 +1174,7 @@ def run_predict_audience(
         documents.append(load_document(path))
 
     if enable_prediction:
-        client = MiroFishClient.from_env()
+        client = MiroFishClient.from_env(verbose=verbose)
     else:
         client = StubPredictionClient()
 
@@ -1428,6 +1434,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.enable_prediction,
                 args.project_name,
                 args.context,
+                args.verbose,
             )
         print("Unknown predict command.", file=sys.stderr)
         return 2
