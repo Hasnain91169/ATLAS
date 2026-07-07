@@ -32,7 +32,7 @@ def test_head_merges_worker_actions(monkeypatch):
         missing_inputs=[],
     )
 
-    def fake_run(self, context, enable_llm, llm, head_name):
+    def fake_run(self, context, enable_llm, llm, head_name, tracer=None):
         return WorkerResult(
             task_id="task-1",
             output=output.summary,

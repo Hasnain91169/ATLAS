@@ -24,6 +24,14 @@ self-hosted, multi-agent social simulator — to predict how an audience will re
 - **Hierarchical multi-agent orchestration** — workers → department heads →
   orchestrator synthesis → human-approved actions, each layer a typed contract
   ([atlas/org/](atlas/org/orchestrator.py), [atlas/org/protocol.py](atlas/org/protocol.py)).
+- **Real agent loop, not prompt-chaining** — `atlas org run --agent` runs each head
+  as a bounded ReAct-style tool-use agent (`query_tasks` / `query_alerts` /
+  `read_brief`) driven by structured outputs, with a max-steps guard
+  ([atlas/org/agent.py](atlas/org/agent.py)).
+- **Tracing & cost observability** — `atlas org run --trace` records a span tree
+  (worker → synthesis → head / agent step) with per-call tokens, latency, and USD
+  cost, persisted to SQLite and viewable via `atlas org trace <id>`
+  ([atlas/org/trace.py](atlas/org/trace.py)).
 - **Hallucination guard on tool use** — LLM-proposed actions are dropped unless
   their `task_id`/`list_id` appear in the provided context, and are auto-converted
   into a "request more info" action otherwise
@@ -146,6 +154,9 @@ single-task decisions. The full integration story is in the
 ## Other commands
 
 ```bash
+atlas org run --agent --enable-llm            # heads as bounded tool-use agents
+atlas org run --trace --enable-llm            # record a cost/latency trace
+atlas org trace <run_id>                      # pretty-print the span tree
 atlas daily-brief --config config.yaml       # daily brief
 atlas hourly-plan --config config.yaml        # hourly plan
 atlas email-triage --input examples/messages.yaml

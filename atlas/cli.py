@@ -22,6 +22,9 @@ from atlas.models.tasks import Task
 from atlas.tasks.google import GoogleTasksAdapter
 from atlas.org.orchestrator import build_context as build_org_context
 from atlas.org.orchestrator import run_atlas_synthesis, run_department_heads
+from atlas.org.agent import run_department_heads_agent
+from atlas.org.trace import Tracer, render_trace
+from atlas.llm.base import build_llm_from_env
 from atlas.evals.dataset import load_dataset
 from atlas.evals.report import render_markdown
 from atlas.evals.runner import run_eval
@@ -48,6 +51,8 @@ from atlas.storage.sqlite import (
     insert_task_sync_log,
     insert_pending_action,
     insert_eval_run,
+    insert_trace,
+    get_trace,
     list_alerts,
     list_pending_actions,
     list_tasks,
@@ -242,6 +247,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print head reports and worker outputs.",
     )
+    org_run.add_argument(
+        "--trace",
+        action="store_true",
+        help="Record a cost/latency trace of the run and print its id.",
+    )
+    org_run.add_argument(
+        "--agent",
+        action="store_true",
+        help="Run heads as bounded tool-use agents (requires --enable-llm).",
+    )
+    org_trace = org_sub.add_parser("trace", help="Show a stored org-run trace.")
+    org_trace.add_argument("run_id", help="Trace run id from `org run --trace`.")
+    org_trace.add_argument("--db", help="Override default database path.")
     actions = subparsers.add_parser(
         "actions",
         help="Manage pending approvals.",
@@ -953,7 +971,10 @@ def run_tasks_list(
 
 
 def _run_org_pipeline(
-    db_path: str | None, enable_llm: bool
+    db_path: str | None,
+    enable_llm: bool,
+    agent: bool = False,
+    tracer: Tracer | None = None,
 ) -> tuple[dict, list]:
     resolved_db_path = (
         Path(db_path).expanduser().resolve() if db_path else default_db_path()
@@ -966,16 +987,33 @@ def _run_org_pipeline(
         conn.close()
 
     try:
-        head_reports = run_department_heads(context, enable_llm=enable_llm)
+        if agent:
+            if not enable_llm:
+                raise RuntimeError("--agent requires --enable-llm.")
+            llm = build_llm_from_env() or OpenAIClient.from_env()
+            head_reports = run_department_heads_agent(context, llm, tracer=tracer)
+        else:
+            head_reports = run_department_heads(
+                context, enable_llm=enable_llm, tracer=tracer
+            )
     except Exception as exc:
         raise RuntimeError(f"Org run failed: {exc}") from exc
     synthesis = run_atlas_synthesis(context, head_reports)
     return synthesis, head_reports
 
 
-def run_org(db_path: str | None, enable_llm: bool, verbose: bool) -> int:
+def run_org(
+    db_path: str | None,
+    enable_llm: bool,
+    verbose: bool,
+    trace: bool = False,
+    agent: bool = False,
+) -> int:
+    tracer = Tracer() if trace else None
     try:
-        synthesis, head_reports = _run_org_pipeline(db_path, enable_llm)
+        synthesis, head_reports = _run_org_pipeline(
+            db_path, enable_llm, agent=agent, tracer=tracer
+        )
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -1038,6 +1076,49 @@ def run_org(db_path: str | None, enable_llm: bool, verbose: bool) -> int:
                 f"- {candidate['action_type']} from {candidate['source_head']}: "
                 f"{candidate['reason']}"
             )
+
+    if tracer is not None:
+        resolved_db_path = (
+            Path(db_path).expanduser().resolve() if db_path else default_db_path()
+        )
+        conn = connect(resolved_db_path)
+        try:
+            init_db(conn)
+            insert_trace(conn, tracer.trace)
+        finally:
+            conn.close()
+        t = tracer.trace
+        print("")
+        print(f"# Trace {t.run_id}")
+        print(f"- LLM calls: {t.llm_calls}")
+        print(f"- Tokens: {t.total_tokens}")
+        print(f"- Cost: ${t.total_cost_usd:.4f}")
+        print(f"- View spans: atlas org trace {t.run_id}")
+    return 0
+
+
+def run_org_trace(db_path: str | None, run_id: str) -> int:
+    resolved_db_path = (
+        Path(db_path).expanduser().resolve() if db_path else default_db_path()
+    )
+    conn = connect(resolved_db_path)
+    try:
+        init_db(conn)
+        record = get_trace(conn, run_id)
+    finally:
+        conn.close()
+    if record is None:
+        print(f"Trace not found: {run_id}", file=sys.stderr)
+        return 2
+
+    from atlas.org.trace import Span, Trace
+
+    data = record["trace"]
+    trace = Trace(
+        run_id=data["run_id"],
+        spans=[Span(**span) for span in data.get("spans", [])],
+    )
+    print(render_trace(trace))
     return 0
 
 
@@ -1465,7 +1546,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.command == "org":
         if args.org_command == "run":
-            return run_org(args.db, args.enable_llm, args.verbose)
+            return run_org(
+                args.db, args.enable_llm, args.verbose, args.trace, args.agent
+            )
+        if args.org_command == "trace":
+            return run_org_trace(args.db, args.run_id)
         print("Unknown org command.", file=sys.stderr)
         return 2
     if args.command == "actions":

@@ -6,6 +6,7 @@ from typing import Any
 
 from atlas.llm.base import LLMClient
 from atlas.org.protocol import HeadReport, HeadSynthesis, WorkerLLMOutput, WorkerResult, WorkerTask
+from atlas.org.trace import Tracer, maybe_span
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class Worker:
         enable_llm: bool,
         llm: LLMClient | None,
         head_name: str,
+        tracer: Tracer | None = None,
     ) -> WorkerResult:
         task = self.build_task(context)
         assumptions, missing_inputs = self._assumptions(context)
@@ -51,7 +53,10 @@ class Worker:
                 )
             prompt = self._build_prompt(task, head_name)
             try:
-                raw = llm.complete(prompt)
+                with maybe_span(tracer, self.name, "worker", head_name) as span:
+                    raw = llm.complete(prompt)
+                    if span is not None:
+                        span.usage = getattr(llm, "last_usage", None)
                 parsed = json.loads(raw)
                 llm_output = WorkerLLMOutput.model_validate(parsed)
                 llm_output, uncertainties = self._post_validate_actions(
@@ -329,13 +334,27 @@ class DepartmentHead:
     workers: list[Worker]
 
     def run(
-        self, context: dict[str, Any], enable_llm: bool, llm: LLMClient | None
+        self,
+        context: dict[str, Any],
+        enable_llm: bool,
+        llm: LLMClient | None,
+        tracer: Tracer | None = None,
+    ) -> HeadReport:
+        with maybe_span(tracer, self.name, "head"):
+            return self._run(context, enable_llm, llm, tracer)
+
+    def _run(
+        self,
+        context: dict[str, Any],
+        enable_llm: bool,
+        llm: LLMClient | None,
+        tracer: Tracer | None,
     ) -> HeadReport:
         results: list[WorkerResult] = []
         worker_trace: list[dict] = []
         for worker in self.workers:
             task = worker.build_task(context)
-            result = worker.run(context, enable_llm, llm, self.name)
+            result = worker.run(context, enable_llm, llm, self.name, tracer)
             results.append(result)
             parsed_output = (
                 result.llm_output.model_dump()
@@ -354,7 +373,7 @@ class DepartmentHead:
             self._merge_worker_outputs(results)
         )
         if enable_llm and llm:
-            synthesis = self._llm_synthesis(results, llm)
+            synthesis = self._llm_synthesis(results, llm, tracer)
             if synthesis:
                 summary = synthesis.domain_summary
                 key_risks = synthesis.key_risks[:3]
@@ -402,7 +421,7 @@ class DepartmentHead:
         return summary, key_risks, recommendations, proposed_actions, confidence, uncertainties
 
     def _llm_synthesis(
-        self, results: list[WorkerResult], llm: LLMClient
+        self, results: list[WorkerResult], llm: LLMClient, tracer: Tracer | None = None
     ) -> HeadSynthesis | None:
         worker_payloads = [
             result.llm_output.model_dump()
@@ -429,7 +448,10 @@ class DepartmentHead:
             f"Return JSON only in this schema:\n{schema}"
         )
         try:
-            raw = llm.complete(prompt)
+            with maybe_span(tracer, f"{self.name}-synth", "synthesis", self.name) as span:
+                raw = llm.complete(prompt)
+                if span is not None:
+                    span.usage = getattr(llm, "last_usage", None)
             parsed = json.loads(raw)
             return HeadSynthesis.model_validate(parsed)
         except Exception:

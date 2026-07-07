@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 CREATE_TABLES = """
 CREATE TABLE IF NOT EXISTS system_log (
@@ -112,5 +112,13 @@ CREATE TABLE IF NOT EXISTS eval_run (
     llm_accuracy REAL,
     agreement REAL,
     metrics_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS org_trace (
+    run_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    total_cost_usd REAL NOT NULL,
+    total_tokens INTEGER NOT NULL,
+    llm_calls INTEGER NOT NULL,
+    trace_json TEXT NOT NULL
 );
 """

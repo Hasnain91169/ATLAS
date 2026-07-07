@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from atlas.agents.context import build_agent_context
-from atlas.llm.base import LLMClient
+from atlas.llm.base import LLMClient, build_llm_from_env
 from atlas.llm.openai import OpenAIClient
 from atlas.org.protocol import HeadReport
 from atlas.org.roles import FinanceHead, LearningHead, OperationsHead, RiskComplianceHead
+from atlas.org.trace import Tracer
 from atlas.storage.sqlite import list_alerts, list_tasks
 
 
@@ -33,14 +34,17 @@ def build_context(conn) -> dict[str, Any]:
 
 
 def run_department_heads(
-    context: dict[str, Any], enable_llm: bool, llm: LLMClient | None = None
+    context: dict[str, Any],
+    enable_llm: bool,
+    llm: LLMClient | None = None,
+    tracer: Tracer | None = None,
 ) -> list[HeadReport]:
     heads = [OperationsHead(), RiskComplianceHead(), FinanceHead(), LearningHead()]
     if enable_llm and llm is None:
-        llm = OpenAIClient.from_env()
+        llm = build_llm_from_env() or OpenAIClient.from_env()
     reports: list[HeadReport] = []
     for head in heads:
-        report = head.run(context, enable_llm, llm)
+        report = head.run(context, enable_llm, llm, tracer)
         reports.append(report)
     return reports
 

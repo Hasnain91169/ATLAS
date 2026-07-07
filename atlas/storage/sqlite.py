@@ -12,6 +12,7 @@ from atlas.storage.schema import CREATE_TABLES, SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from atlas.evals.models import EvalReport
+    from atlas.org.trace import Trace
     from atlas.prediction.models import PredictionResult
 
 
@@ -630,6 +631,44 @@ def insert_eval_run(conn: sqlite3.Connection, report: "EvalReport") -> int:
     )
     conn.commit()
     return int(cursor.lastrowid)
+
+
+def insert_trace(conn: sqlite3.Connection, trace: "Trace") -> str:
+    created_at = datetime.now(timezone.utc).isoformat()
+    payload = trace.to_dict()
+    conn.execute(
+        "INSERT OR REPLACE INTO org_trace "
+        "(run_id, created_at, total_cost_usd, total_tokens, llm_calls, trace_json) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            trace.run_id,
+            created_at,
+            trace.total_cost_usd,
+            trace.total_tokens,
+            trace.llm_calls,
+            json.dumps(payload, sort_keys=True),
+        ),
+    )
+    conn.commit()
+    return trace.run_id
+
+
+def get_trace(conn: sqlite3.Connection, run_id: str) -> dict[str, object] | None:
+    row = conn.execute(
+        "SELECT run_id, created_at, total_cost_usd, total_tokens, llm_calls, trace_json "
+        "FROM org_trace WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "run_id": row["run_id"],
+        "created_at": row["created_at"],
+        "total_cost_usd": row["total_cost_usd"],
+        "total_tokens": row["total_tokens"],
+        "llm_calls": row["llm_calls"],
+        "trace": json.loads(row["trace_json"]),
+    }
 
 
 def get_latest_audience_forecast(
