@@ -145,7 +145,7 @@ class MiroFishClient(PredictionClient):
             {"simulation_id": simulation_id, "use_llm_for_profiles": True},
         )
         task_id = started.get("task_id")
-        self._poll(
+        final = self._poll(
             lambda: self._post_json(
                 "/api/simulation/prepare/status",
                 {"task_id": task_id, "simulation_id": simulation_id},
@@ -153,6 +153,20 @@ class MiroFishClient(PredictionClient):
             deadline,
             "prepare",
         )
+        # The prepare task can report "completed" while producing no agents when
+        # the seed material has no extractable entities. Catch that here so it
+        # fails with a clear message instead of a cryptic 400 at /start.
+        result = final.get("result")
+        result = result if isinstance(result, dict) else {}
+        if result.get("error"):
+            raise RuntimeError(f"MiroFish prepare failed: {result['error']}")
+        if result.get("entities_count") == 0:
+            raise RuntimeError(
+                "MiroFish generated 0 agents from the seed material. The input is "
+                "too thin to build a social world — provide a richer seed document "
+                "(background, named people/teams/orgs, stakeholder context), not a "
+                "one-line message."
+            )
 
     def _run(self, simulation_id: str, deadline: float) -> None:
         self._post_json(

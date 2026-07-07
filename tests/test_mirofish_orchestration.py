@@ -131,6 +131,22 @@ def test_success_false_raises(monkeypatch):
         _client().simulate(PredictionSeed(requirement="q", documents=[]))
 
 
+class ZeroAgentBackend(FakeBackend):
+    """Prepare completes but yields no entities (seed too thin)."""
+
+    def __call__(self, req, timeout=None):
+        path = req.full_url.replace("http://localhost:5001", "")
+        if path == "/api/simulation/prepare/status":
+            return ok({"status": "completed", "progress": 100, "result": {"entities_count": 0}})
+        return super().__call__(req, timeout)
+
+
+def test_zero_agent_prepare_fails_clearly(monkeypatch):
+    monkeypatch.setattr("atlas.prediction.mirofish.urlopen", ZeroAgentBackend())
+    with pytest.raises(RuntimeError, match="0 agents"):
+        _client().simulate(PredictionSeed(requirement="q", documents=[]))
+
+
 def test_backend_unreachable_message(monkeypatch):
     from urllib.error import URLError
 
