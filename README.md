@@ -1,174 +1,166 @@
-# ATLAS
+# ATLAS — a multi-agent personal operating company
 
-**A personal "operating company" assistant.** ATLAS models your work like a small
-organization: department *heads* produce reports, an orchestrator (Atlas) synthesizes
-them, and the system proposes concrete actions you can review and approve. It includes a
-daily brief, risk alerts, hourly planning, email triage, board-meeting reports (with
-optional text-to-speech), Google Tasks sync, and a local mobile server.
+[![CI](https://github.com/Hasnain91169/ATLAS/actions/workflows/ci.yml/badge.svg)](https://github.com/Hasnain91169/ATLAS/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.11%E2%80%933.13-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> Status: early (v0.1.0). Interfaces may change.
+ATLAS runs your work like a small company staffed by LLM agents. Specialist
+**workers** analyze your tasks, alerts, and calendar; **department heads**
+(Operations, Risk & Compliance, Finance, Learning) synthesize their workers into
+domain reports; an **orchestrator** merges those into "what mattered / what
+happens next" and a short list of **actions you approve** before anything runs.
 
-## Requirements
+On top of that decision loop, ATLAS can **rehearse the future**: give it a message
+or announcement and it drives [MiroFish](https://github.com/666ghj/MiroFish) — a
+self-hosted, multi-agent social simulator — to predict how an audience will react
+*before* you send it, returning a report and a `LOW`/`MEDIUM`/`HIGH` risk verdict.
 
-- Python **3.11+**
-- Runtime dependencies: [`pydantic`](https://docs.pydantic.dev/) and `PyYAML` (installed
-  automatically). External integrations (OpenAI, ElevenLabs, Google Tasks) are optional
-  and activated via environment variables.
+> Personal project. Built to explore production-shaped agent engineering:
+> hierarchical multi-agent orchestration, LLM-as-judge with fail-open fallbacks,
+> a reverse-engineered async integration, and human-in-the-loop approval.
 
-## Installation
+## Engineering highlights
 
-```bash
-git clone <your-repo-url> atlas
-cd atlas
-python -m venv .venv
-# Windows:  .venv\Scripts\activate
-# macOS/Linux:  source .venv/bin/activate
-pip install -e ".[dev]"
+- **Hierarchical multi-agent orchestration** — workers → department heads →
+  orchestrator synthesis → human-approved actions, each layer a typed contract
+  ([atlas/org/](atlas/org/orchestrator.py), [atlas/org/protocol.py](atlas/org/protocol.py)).
+- **Hallucination guard on tool use** — LLM-proposed actions are dropped unless
+  their `task_id`/`list_id` appear in the provided context, and are auto-converted
+  into a "request more info" action otherwise
+  ([`_post_validate_actions`](atlas/org/roles.py)).
+- **Reverse-engineered a black-box multi-agent simulator** — MiroFish ships no API
+  docs; the client was built by reading its Flask source, unwrapping a
+  `{success, data}` envelope, and modeling a **6-stage async pipeline** as a polled
+  state machine with wall-clock deadlines ([atlas/prediction/mirofish.py](atlas/prediction/mirofish.py)).
+  See the [case study](docs/case-study-mirofish.md).
+- **LLM-as-judge with fail-open fallback** — audience reports are classified into a
+  risk verdict by an LLM, degrading gracefully to a deterministic keyword heuristic
+  when no model is configured or its output is unusable
+  ([atlas/prediction/assess.py](atlas/prediction/assess.py)).
+- **Provider-agnostic + local models** — any OpenAI-compatible endpoint, including
+  local Ollama/LM Studio ([atlas/llm/](atlas/llm/base.py)).
+- **Tested like production** — 70+ tests, including **fully mocked network
+  pipelines** (the entire MiroFish 6-stage flow is exercised without a backend) and
+  deterministic offline stubs, green in CI across Python 3.11–3.13.
+
+## Architecture
+
+### The org decision loop
+
+```mermaid
+flowchart TD
+    subgraph Context
+        T[Tasks] & A[Alerts] & B[Daily brief]
+    end
+    Context --> W1[Worker: TaskAnalyst] & W2[Worker: RiskScanner] & W3[Worker: OpsPlanner]
+    W1 & W3 --> H1[Operations Head]
+    W2 --> H2[Risk & Compliance Head]
+    H1 & H2 --> O[Atlas orchestrator synthesis]
+    O --> P["Proposed actions (what mattered / what happens next)"]
+    P --> HU{Human review}
+    HU -->|approve| E[Execute action]
+    HU -->|reject| X[Discard]
 ```
 
-This installs the `atlas` console command.
+### The MiroFish audience-prediction pipeline
+
+```mermaid
+flowchart LR
+    S[Seed doc + requirement] --> ON[1. ontology/generate]
+    ON --> GB[2. graph/build ⏳poll]
+    GB --> CR[3. simulation/create]
+    CR --> PR[4. prepare ⏳poll]
+    PR --> RU[5. start + run-status ⏳poll]
+    RU --> RE[6. report/generate ⏳poll]
+    RE --> J[LLM-as-judge verdict]
+    J --> V["LOW / MEDIUM / HIGH + report"]
+```
+
+## Quick start
+
+```bash
+git clone https://github.com/Hasnain91169/ATLAS.git atlas && cd atlas
+python -m venv .venv
+# Windows:  .venv\Scripts\activate     macOS/Linux:  source .venv/bin/activate
+pip install -e ".[dev]"
+pytest                                  # 70+ tests, no external services needed
+
+atlas demo --config config.yaml         # populate a local SQLite db
+atlas org run --verbose                 # run the multi-agent org loop
+atlas predict audience \
+  --requirement "How will staff react to this reorg?" \
+  --input examples/sample-announcement.md   # offline stub by default
+```
+
+Everything runs offline out of the box (deterministic stubs). LLM and external
+integrations are opt-in via environment variables.
 
 ## Configuration
 
-Most commands take a YAML config via `--config`. Data is persisted to a local SQLite
-database whose default location is:
+Most commands take a YAML config via `--config`. Data persists to a local SQLite
+database (`%LOCALAPPDATA%\atlas\atlas.db` on Windows, `~/.atlas/atlas.db`
+elsewhere); override with `--db`.
 
-- **Windows:** `%LOCALAPPDATA%\atlas\atlas.db`
-- **macOS/Linux:** `~/.atlas/atlas.db`
+External services are opt-in — a command only needs a key when you invoke a feature
+that uses it:
 
-Override the path on any command with `--db /path/to/atlas.db`.
-
-### Environment variables
-
-External services are opt-in. A command only requires a key when you invoke a feature
-that uses it.
-
-| Variable | Used by | Required for |
+| Variable | Used by | Notes |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | LLM features | Any LLM-backed reasoning |
-| `OPENAI_MODEL` | LLM features | Optional (default `gpt-5-mini`) |
-| `OPENAI_BASE_URL` | LLM features | Optional (custom/proxy endpoint) |
-| `MIROFISH_BASE_URL` | `predict audience --enable-prediction` | Optional (default `http://localhost:5001`, your self-hosted MiroFish backend) |
-| `MIROFISH_PLATFORM` | Prediction features | Optional (`reddit`\|`twitter`\|`parallel`, default `reddit`) |
-| `MIROFISH_MAX_ROUNDS` | Prediction features | Optional (simulation rounds, default `10`) |
-| `ELEVENLABS_API_KEY` | Board-meeting `speak` | Generating audio |
-| `ELEVENLABS_MODEL` | Board-meeting `speak` | Optional (default `eleven_multilingual_v2`) |
-| `GOOGLE_TASKS_CLIENT_ID` | `tasks sync` | Google Tasks sync |
-| `GOOGLE_TASKS_CLIENT_SECRET` | `tasks sync` | Google Tasks sync |
-| `GOOGLE_TASKS_REFRESH_TOKEN` | `tasks sync` | Google Tasks sync |
-| `ATLAS_MOBILE_TOKEN` | `atlas serve` | Starting the mobile server |
+| `OPENAI_API_KEY` | LLM reasoning & verdicts | Any OpenAI-compatible key |
+| `OPENAI_BASE_URL` | LLM features | Point at a local model (Ollama: `http://localhost:11434`) |
+| `OPENAI_MODEL` | LLM features | Default `gpt-5-mini` |
+| `MIROFISH_BASE_URL` | `predict audience --enable-prediction` | Default `http://localhost:5001` |
+| `MIROFISH_PLATFORM` / `MIROFISH_MAX_ROUNDS` | Prediction | `reddit`\|`twitter`\|`parallel`; sim rounds |
+| `ELEVENLABS_API_KEY` | Board-meeting `speak` | Text-to-speech |
+| `GOOGLE_TASKS_*` | `tasks sync` | Client id/secret/refresh token |
+| `ATLAS_MOBILE_TOKEN` | `atlas serve` | Local mobile server auth |
 
-Never commit these values — set them in your shell or a local, git-ignored `.env`.
-
-## Usage
-
-Run `atlas --help` to see all commands. Highlights:
-
-```bash
-# Generate deterministic demo artifacts and populate the database
-atlas demo --config config.yaml
-
-# Daily brief
-atlas daily-brief --config config.yaml
-
-# Hourly plan for today
-atlas hourly-plan --config config.yaml
-
-# Triage a set of messages (.yaml / .yml / .jsonl)
-atlas email-triage --input examples/messages.yaml
-
-# Board meeting: print report, then synthesize audio per head
-atlas board-meeting report
-atlas board-meeting speak            # requires ELEVENLABS_API_KEY
-
-# Run hierarchical org reports (heads -> Atlas synthesis)
-atlas org run
-
-# Propose / review / approve actions
-atlas actions propose
-atlas actions list
-atlas actions approve <action_id>
-
-# Predict audience reaction with MiroFish (offline stub by default)
-atlas predict audience --requirement "How will staff react to this reorg?" \
-    --input announcement.md
-# Drive a real self-hosted MiroFish backend (see Prediction below):
-atlas predict audience --requirement "..." --input brief.md --enable-prediction
-
-# Google Tasks (read-only sync into local DB)
-atlas tasks sync --config config.yaml
-atlas tasks list
-
-# Risk alerts
-atlas alerts --severity HIGH
-
-# Environment / connectivity check
-atlas doctor
-
-# Local mobile server (LAN only, token required)
-atlas serve            # requires ATLAS_MOBILE_TOKEN
-```
-
-See `examples/messages.yaml` for a sample input file.
+Never commit these — set them in your shell or a git-ignored `.env`.
 
 ## Prediction (MiroFish)
 
 `atlas predict audience` rehearses how a real-world audience might react to a
-message, announcement, or brief *before* you commit to it. It seeds
-[MiroFish](https://github.com/666ghj/MiroFish) — a self-hosted, multi-agent swarm
-simulation engine — with your document(s) and a natural-language prediction
-requirement, drives its simulation pipeline, and returns a reaction report plus a
-risk verdict (`LOW`/`MEDIUM`/`HIGH`). When `OPENAI_API_KEY` is set the verdict is
-classified from the report by the LLM; otherwise it falls back to a keyword
-heuristic. Results are stored locally.
+message before you commit to it. It seeds
+[MiroFish](https://github.com/666ghj/MiroFish) with your document(s) + a
+natural-language requirement, drives its simulation, and returns a reaction report
+plus a risk verdict. When an LLM is configured the verdict is classified from the
+report; otherwise it falls back to a keyword heuristic. A committed
+[sample report](examples/sample-reaction-report.md) shows the output shape.
 
-By default the command runs against a **deterministic offline stub**, so it works
-with no external services. To run a real simulation:
+By default it runs against a **deterministic offline stub**. For a real simulation,
+stand up MiroFish locally (`docker compose up -d`; needs its own `LLM_API_KEY` +
+`ZEP_API_KEY`), then pass `--enable-prediction`. A real run is asynchronous and
+takes minutes; `--verbose` logs each pipeline stage. MiroFish simulates
+*collective/social* reaction — it fits audience/PR/comms questions, not private
+single-task decisions. The full integration story is in the
+[case study](docs/case-study-mirofish.md).
 
-1. Stand up MiroFish locally per its README (clone, set its own `LLM_API_KEY` +
-   `ZEP_API_KEY`, then `docker compose up -d`). Its Flask backend listens on
-   `http://localhost:5001`.
-2. Point Atlas at it with `MIROFISH_BASE_URL` (defaults to `http://localhost:5001`)
-   and pass `--enable-prediction`.
-
-A real run is asynchronous and can take several minutes (MiroFish builds a persona
-graph, generates agents, runs N simulation rounds, then a report). MiroFish
-simulates *collective/social reaction* to a seed event — it fits audience/PR/comms
-questions, not private single-task decisions. `atlas doctor` reports whether the
-backend is reachable.
-
-## Development
+## Other commands
 
 ```bash
-pip install -e ".[dev]"
-pytest
+atlas daily-brief --config config.yaml       # daily brief
+atlas hourly-plan --config config.yaml        # hourly plan
+atlas email-triage --input examples/messages.yaml
+atlas board-meeting report                    # weekly board report (+ speak for TTS)
+atlas actions propose | list | approve <id>   # propose/review/approve actions
+atlas alerts --severity HIGH                  # risk alerts
+atlas doctor                                  # environment / connectivity check
+atlas serve                                   # local mobile server (token required)
 ```
-
-The `tests/` directory contains the full suite (unit + CLI coverage).
 
 ## Project layout
 
 ```
 atlas/
-  actions/       Action proposal, models, and execution
-  agents/        Agent drafting and context
-  board_meeting/ Report building, splitting, manifests
-  brief/         Daily brief generation, scoring, tagging
-  calendar/      Calendar interfaces (stub)
-  llm/           LLM client (OpenAI)
-  mobile/        Local mobile server
-  models/        Pydantic data models
-  org/           Hierarchical orchestrator + protocol
-  prediction/    MiroFish audience-reaction client + workflow
-  risk/          Risk rules and alerts
+  org/           Hierarchical orchestrator + worker/head protocol
+  prediction/    MiroFish client, audience workflow, LLM-as-judge
+  llm/           Provider-agnostic LLM clients (OpenAI-compatible)
+  actions/       Action proposal, models, execution
+  agents/ brief/ board_meeting/ risk/ tasks/ tts/   Feature modules
   storage/       SQLite persistence + schema
-  tasks/         Task providers (Google, stub)
-  tts/           Text-to-speech (ElevenLabs), chunking, voices
   workflows/     End-to-end workflows
-tests/           Test suite
-examples/        Sample inputs
-scripts/         Helper scripts
-static/          Mobile web client
+docs/            Case study & engineering writeups
+tests/           70+ tests (unit, CLI, mocked network pipelines)
 ```
 
 ## License
