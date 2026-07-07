@@ -19,6 +19,17 @@ self-hosted, multi-agent social simulator — to predict how an audience will re
 > hierarchical multi-agent orchestration, LLM-as-judge with fail-open fallbacks,
 > a reverse-engineered async integration, and human-in-the-loop approval.
 
+## Live demo
+
+An interactive **offline** tour (no keys, no cost) is in
+[streamlit_app.py](streamlit_app.py): rehearse an audience reaction, run the eval
+harness, and watch a traced org run with cost totals. Run it locally with
+`streamlit run streamlit_app.py`, or deploy free to
+[Streamlit Community Cloud](https://share.streamlit.io) straight from this repo
+(`requirements.txt` + `streamlit_app.py` are included).
+
+<!-- After deploying, add: [![Live demo](https://img.shields.io/badge/live-demo-brightgreen)](YOUR_STREAMLIT_URL) -->
+
 ## Engineering highlights
 
 - **Hierarchical multi-agent orchestration** — workers → department heads →

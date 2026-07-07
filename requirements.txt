@@ -1,0 +1,6 @@
+# Dependencies for the hosted Streamlit demo (streamlit_app.py).
+# The `atlas` package is imported from the repo root at runtime, so only its
+# runtime deps + streamlit are needed.
+pydantic>=2.6,<3
+PyYAML>=6.0,<7
+streamlit>=1.30
