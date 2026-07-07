@@ -103,7 +103,10 @@ def test_full_pipeline(monkeypatch):
     assert "multipart/form-data" in backend.ontology_content_type
 
 
-class FakeLLM:
+from atlas.llm.base import LLMClient
+
+
+class FakeLLM(LLMClient):
     def __init__(self, response):
         self.response = response
 

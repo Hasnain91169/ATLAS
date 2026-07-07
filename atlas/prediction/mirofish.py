@@ -302,12 +302,9 @@ def _err_text(error: Any) -> str:
 
 def _llm_from_env() -> LLMClient | None:
     """Build an LLM client for report classification, or None to use the heuristic."""
-    from atlas.llm.openai import OpenAIClient
+    from atlas.llm.base import build_llm_from_env
 
-    try:
-        return OpenAIClient.from_env()
-    except RuntimeError:
-        return None
+    return build_llm_from_env()
 
 
 def _status_done(payload: dict[str, Any]) -> bool:

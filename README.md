@@ -111,9 +111,12 @@ that uses it:
 
 | Variable | Used by | Notes |
 | --- | --- | --- |
+| `ATLAS_LLM_PROVIDER` | Provider selection | `openai` (default) or `anthropic` |
 | `OPENAI_API_KEY` | LLM reasoning & verdicts | Any OpenAI-compatible key |
 | `OPENAI_BASE_URL` | LLM features | Point at a local model (Ollama: `http://localhost:11434`) |
 | `OPENAI_MODEL` | LLM features | Default `gpt-5-mini` |
+| `ANTHROPIC_API_KEY` | Anthropic provider | Requires `pip install -e ".[anthropic]"` |
+| `ANTHROPIC_MODEL` | Anthropic provider | Default `claude-opus-4-8` |
 | `MIROFISH_BASE_URL` | `predict audience --enable-prediction` | Default `http://localhost:5001` |
 | `MIROFISH_PLATFORM` / `MIROFISH_MAX_ROUNDS` | Prediction | `reddit`\|`twitter`\|`parallel`; sim rounds |
 | `ELEVENLABS_API_KEY` | Board-meeting `speak` | Text-to-speech |

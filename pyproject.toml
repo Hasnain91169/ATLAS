@@ -18,6 +18,11 @@ dependencies = [
 dev = [
     "pytest>=8",
 ]
+# Optional: the Anthropic provider (ATLAS_LLM_PROVIDER=anthropic). The OpenAI /
+# local-model path uses stdlib urllib and needs no extra install.
+anthropic = [
+    "anthropic>=0.40",
+]
 
 [project.scripts]
 atlas = "atlas.cli:main"

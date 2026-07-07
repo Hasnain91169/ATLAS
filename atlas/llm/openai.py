@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from atlas.llm.base import LLMClient
+from atlas.llm.base import LLMClient, LLMUsage
 
 DEFAULT_BASE_URL = "https://api.openai.com"
 USER_AGENT = "atlas/0.1"
@@ -16,6 +17,7 @@ class OpenAIClient(LLMClient):
         self._api_key = api_key
         self._model = model
         self._base_url = base_url.rstrip("/")
+        self.last_usage: LLMUsage | None = None
 
     @classmethod
     def from_env(cls) -> "OpenAIClient":
@@ -48,6 +50,7 @@ class OpenAIClient(LLMClient):
             },
             method="POST",
         )
+        start = time.perf_counter()
         try:
             with urlopen(req, timeout=15) as response:
                 response_payload = json.loads(response.read().decode("utf-8"))
@@ -63,6 +66,12 @@ class OpenAIClient(LLMClient):
         content = message.get("content")
         if not content:
             raise RuntimeError("OpenAI response missing content.")
+        usage = response_payload.get("usage") or {}
+        self.last_usage = LLMUsage(
+            input_tokens=int(usage.get("prompt_tokens", 0) or 0),
+            output_tokens=int(usage.get("completion_tokens", 0) or 0),
+            latency_ms=(time.perf_counter() - start) * 1000.0,
+        )
         return str(content).strip()
 
 

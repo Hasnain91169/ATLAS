@@ -1,12 +1,22 @@
 from __future__ import annotations
 
-import json
-
 from atlas.llm.base import LLMClient
 from atlas.prediction.models import Verdict, derive_verdict
 
 _VALID: set[str] = {"LOW", "MEDIUM", "HIGH"}
 _MAX_REPORT_CHARS = 6000
+
+# Native structured-output schema (used by providers that support it, e.g. Anthropic).
+_VERDICT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
+        "risk_score": {"type": "number"},
+        "rationale": {"type": "string"},
+    },
+    "required": ["verdict", "risk_score"],
+    "additionalProperties": False,
+}
 
 
 def assess_reaction(
@@ -29,8 +39,10 @@ def assess_reaction(
 def _classify_with_llm(
     report_markdown: str, requirement: str, llm: LLMClient
 ) -> tuple[Verdict, float]:
-    raw = llm.complete(_build_prompt(report_markdown, requirement))
-    parsed = json.loads(raw)
+    # Prefer native structured outputs; the base client falls back to complete()+parse.
+    parsed = llm.complete_structured(
+        _build_prompt(report_markdown, requirement), _VERDICT_SCHEMA
+    )
     verdict = str(parsed.get("verdict", "")).upper()
     if verdict not in _VALID:
         raise ValueError(f"Invalid verdict: {verdict!r}")
