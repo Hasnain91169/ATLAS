@@ -117,8 +117,10 @@ See `examples/messages.yaml` for a sample input file.
 message, announcement, or brief *before* you commit to it. It seeds
 [MiroFish](https://github.com/666ghj/MiroFish) — a self-hosted, multi-agent swarm
 simulation engine — with your document(s) and a natural-language prediction
-requirement, drives its simulation pipeline, and returns a reaction report plus an
-approximate risk verdict (`LOW`/`MEDIUM`/`HIGH`). Results are stored locally.
+requirement, drives its simulation pipeline, and returns a reaction report plus a
+risk verdict (`LOW`/`MEDIUM`/`HIGH`). When `OPENAI_API_KEY` is set the verdict is
+classified from the report by the LLM; otherwise it falls back to a keyword
+heuristic. Results are stored locally.
 
 By default the command runs against a **deterministic offline stub**, so it works
 with no external services. To run a real simulation:

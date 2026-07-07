@@ -56,9 +56,9 @@ class PredictionResult(BaseModel):
 def derive_verdict(report_markdown: str) -> tuple[Verdict, float]:
     """Approximate an audience-reaction risk from report text.
 
-    Heuristic only; a MiroFish report is prose. Swap for an LLM-based
-    classification (Atlas already has an OpenAI client) when higher fidelity
-    is needed.
+    Keyword heuristic used as the fail-open fallback. When an LLM client is
+    available, ``atlas.prediction.assess.assess_reaction`` classifies the prose
+    report directly and only falls back here on failure.
     """
     text = report_markdown.lower()
     hits = sum(text.count(keyword) for keyword in BACKLASH_KEYWORDS)

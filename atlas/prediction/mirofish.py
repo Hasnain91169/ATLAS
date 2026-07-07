@@ -8,8 +8,10 @@ from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from atlas.llm.base import LLMClient
+from atlas.prediction.assess import assess_reaction
 from atlas.prediction.base import PredictionClient
-from atlas.prediction.models import PredictionResult, PredictionSeed, derive_verdict
+from atlas.prediction.models import PredictionResult, PredictionSeed
 
 # Self-hosted MiroFish backend (github.com/666ghj/MiroFish). Local Flask app,
 # no auth, CORS open. Not a hosted SaaS endpoint.
@@ -39,6 +41,7 @@ class MiroFishClient(PredictionClient):
         poll_interval: float = 5.0,
         deadline: float = 1800.0,
         request_timeout: float = 60.0,
+        llm: LLMClient | None = None,
     ):
         self._base_url = base_url.rstrip("/")
         self._platform = platform
@@ -46,13 +49,14 @@ class MiroFishClient(PredictionClient):
         self._poll_interval = poll_interval
         self._deadline = deadline
         self._request_timeout = request_timeout
+        self._llm = llm
 
     @classmethod
     def from_env(cls) -> "MiroFishClient":
         base_url = os.environ.get("MIROFISH_BASE_URL", DEFAULT_BASE_URL)
         platform = os.environ.get("MIROFISH_PLATFORM", "reddit")
         max_rounds = int(os.environ.get("MIROFISH_MAX_ROUNDS", "10"))
-        return cls(base_url, platform=platform, max_rounds=max_rounds)
+        return cls(base_url, platform=platform, max_rounds=max_rounds, llm=_llm_from_env())
 
     # -- pipeline ---------------------------------------------------------
 
@@ -69,7 +73,7 @@ class MiroFishClient(PredictionClient):
         markdown = str(report.get("markdown_content", ""))
         if not markdown:
             raise RuntimeError("MiroFish report missing markdown_content.")
-        verdict, risk_score = derive_verdict(markdown)
+        verdict, risk_score = assess_reaction(markdown, seed.requirement, self._llm)
         return PredictionResult(
             report_markdown=markdown,
             outline=str(report.get("outline", "") or ""),
@@ -246,6 +250,16 @@ class MiroFishClient(PredictionClient):
 
 
 # -- helpers --------------------------------------------------------------
+
+
+def _llm_from_env() -> LLMClient | None:
+    """Build an LLM client for report classification, or None to use the heuristic."""
+    from atlas.llm.openai import OpenAIClient
+
+    try:
+        return OpenAIClient.from_env()
+    except RuntimeError:
+        return None
 
 
 def _status_done(payload: dict[str, Any]) -> bool:

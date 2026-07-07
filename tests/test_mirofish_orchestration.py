@@ -94,6 +94,31 @@ def test_full_pipeline(monkeypatch):
     assert "multipart/form-data" in backend.ontology_content_type
 
 
+class FakeLLM:
+    def __init__(self, response):
+        self.response = response
+
+    def complete(self, prompt):
+        return self.response
+
+
+def test_llm_classifies_report(monkeypatch):
+    backend = FakeBackend()
+    monkeypatch.setattr("atlas.prediction.mirofish.urlopen", backend)
+
+    # Report text is full of backlash terms (heuristic would say HIGH), but the
+    # LLM overrides to LOW -> proves the LLM path drives the verdict.
+    llm = FakeLLM('{"verdict":"LOW","risk_score":0.15}')
+    client = MiroFishClient(
+        "http://localhost:5001", max_rounds=3, poll_interval=0, deadline=30, llm=llm
+    )
+    seed = PredictionSeed(requirement="q", documents=[])
+
+    result = client.simulate(seed)
+    assert result.verdict == "LOW"
+    assert result.risk_score == 0.15
+
+
 def test_backend_unreachable_message(monkeypatch):
     from urllib.error import URLError
 
